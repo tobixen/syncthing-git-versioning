@@ -37,24 +37,30 @@ versioning script, then your old files can be stored there.
 Quick Start
 -----------
 
-#. Download ``syncthing-git-versioning`` to ``/usr/local/bin/`` and mark it
-   executable using ``chmod 755 /usr/local/bin/syncthing-git-versioning`` (or
-   use some other path as you wish).
+#. Install by running ``make install`` from the source directory. This installs
+   to ``/usr/local/bin/`` when run as root, or to ``~/.local/bin/`` otherwise.
 
-#. Create a git repository to correspond to a sync folder (create the
-   directory, then run ``git init``).
+   Alternatively, download ``syncthing-git-versioning`` manually to any
+   directory on your ``$PATH`` and mark it executable with ``chmod 755``.
 
-#. In Syncthing, go to "Edit" against your desired folder and go to the "File
-   Versioning" tab. Under "File Versioning", choose "External File Versioning"
-   and set "Command" to ``syncthing-git-versioning /path/to/repo
-   %FOLDER_PATH% %FILE_PATH%``, replacing
-   ``/path/to/repo`` with the path the git repository you created in the
-   previous step. Do not expand ``%FOLDER_PATH%`` nor ``%FILE_PATH%``;
-   Syncthing will do this at runtime.
+#. Run ``syncthing-git-versioning setup`` to configure an existing Syncthing folder
+   interactively. It will connect to your local Syncthing instance via its REST
+   API, let you pick a folder, create a git repository for old versions, and
+   apply the configuration without requiring a restart.
+
+   Alternatively, configure manually: create a git repository (``mkdir
+   /path/to/repo && git init /path/to/repo``), then in the Syncthing web GUI
+   go to "Edit" on your desired folder, open the "File Versioning" tab, choose
+   "External File Versioning", and set "Command" to::
+
+       syncthing-git-versioning /path/to/repo %FOLDER_PATH% %FILE_PATH%
+
+   Do not expand ``%FOLDER_PATH%`` or ``%FILE_PATH%``; Syncthing substitutes
+   them at runtime.
 
 #. Test by changing and deleting files in the sync folder on other devices.
    After Syncthing has synced the changes, inspect the git repository. You
-   should see old versions of changed and deleting files appearing there.
+   should see old versions of changed and deleted files appearing there.
 
 Details
 -------
@@ -85,10 +91,10 @@ Details
   will need to add rules to allow this tool to do its work. See the
   ``apparmor/`` directory for an example.
 
-* A test suite is included. On Debian, you can run this with ``py.test-3``
-  after ``sudo apt install git git-annex python3-pytest``. The test suite uses
-  the ``syncthing-git-versioning`` shell script that is in the same directory
-  as the test suite itself.
+* A test suite is included. Run it with ``make test``, or directly with
+  ``py.test-3`` after ``sudo apt install git git-annex python3-pytest``. The
+  test suite uses the ``syncthing-git-versioning`` shell script in the same
+  directory.
 
 License
 -------

@@ -1,0 +1,363 @@
+#!/usr/bin/env python3
+"""
+Set up syncthing-git-versioning for an existing Syncthing folder.
+
+Using this script should be a lot easier than manual web setup
+
+Copyright 2024 Tobias Brox
+
+This Source Code Form is subject to the terms of the Mozilla Public
+License, v. 2.0. If a copy of the MPL was not distributed with this
+file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+Dependencies: python 3.9 or higher.  All imports are from the standard
+library.  Syncthing needs to be running.
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import urllib.request
+import urllib.error
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+
+class UserError(Exception):
+    """Raised for user-visible errors; caught at the top level to print a message and exit 1."""
+
+
+def _xdg_state_home() -> Path:
+    """Return XDG_STATE_HOME, defaulting to ~/.local/state per the XDG spec."""
+    return Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
+
+
+def _xdg_config_home() -> Path:
+    """Return XDG_CONFIG_HOME, defaulting to ~/.config per the XDG spec."""
+    return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+
+
+def _xdg_bin_home() -> Path:
+    """Return the user executable directory, defaulting to ~/.local/bin."""
+    return Path(os.environ.get("XDG_BIN_HOME", Path.home() / ".local/bin"))
+
+
+def _config_search_paths() -> list[Path]:
+    """Return the ordered list of candidate Syncthing config.xml locations.
+
+    Paths are derived from XDG environment variables so that non-standard
+    installations are respected.  The system-wide Syncthing service path is
+    included as a final fallback.
+    """
+    return [
+        _xdg_state_home() / "syncthing/config.xml",
+        _xdg_config_home() / "syncthing/config.xml",
+        Path("/var/lib/syncthing/.config/syncthing/config.xml"),
+    ]
+
+
+def find_versioning_script() -> Path | None:
+    """Locate the syncthing-git-versioning executable.
+
+    Searches /usr/local/bin, the XDG user bin directory (XDG_BIN_HOME,
+    defaulting to ~/.local/bin), and the directory containing this script,
+    in that order.
+
+    Returns the path of the first executable found, or None if none exists.
+    """
+    candidates = [
+        Path(__file__).resolve().parent / "syncthing-git-versioning",
+        Path("/usr/local/bin/syncthing-git-versioning"),
+        _xdg_bin_home() / "syncthing-git-versioning",
+    ]
+    for path in candidates:
+        if path.is_file() and os.access(path, os.X_OK):
+            return path
+    return None
+
+
+def find_syncthing_config() -> Path | None:
+    """Search standard locations for Syncthing's config.xml.
+
+    Locations are derived from XDG environment variables; see
+    _config_search_paths() for the full search order.
+
+    Returns the first path that exists, or None if none is found.
+    """
+    for path in _config_search_paths():
+        if path.exists():
+            return path
+    return None
+
+
+def parse_syncthing_config(config_path: Path) -> tuple[str, str]:
+    """Extract the REST API key and base URL from a Syncthing config.xml.
+
+    Exits with an error message if the file is malformed or the expected
+    elements are absent.
+
+    Returns a (api_key, base_url) tuple where base_url always starts with
+    'http'.
+    """
+    tree = ET.parse(config_path)
+    root = tree.getroot()
+    gui = root.find("gui")
+    if gui is None:
+        raise UserError(f"Malformed Syncthing config: <gui> element not found in {config_path}")
+    apikey_el = gui.find("apikey")
+    address_el = gui.find("address")
+    if apikey_el is None or apikey_el.text is None:
+        raise UserError(f"Malformed Syncthing config: <apikey> not found under <gui> in {config_path}")
+    if address_el is None or address_el.text is None:
+        raise UserError(f"Malformed Syncthing config: <address> not found under <gui> in {config_path}")
+    address = address_el.text
+    if not address.startswith("http"):
+        address = "http://" + address
+    return apikey_el.text, address
+
+
+def api(base_url: str, api_key: str, path: str, method: str = "GET", data: object = None) -> object:
+    """Make an authenticated request to the Syncthing REST API.
+
+    Parameters:
+        base_url: Syncthing API root, e.g. 'http://127.0.0.1:8384'.
+        api_key:  Value for the X-API-Key header.
+        path:     API path, e.g. '/rest/config/folders'.
+        method:   HTTP method (default 'GET').
+        data:     Object to JSON-encode as the request body (optional).
+
+    Returns the decoded JSON response, or None if the response body is empty.
+    Exits with an error message on HTTP errors or connection failures.
+    """
+    url = base_url.rstrip("/") + path
+    headers = {"X-API-Key": api_key}
+    body = None
+    if data is not None:
+        body = json.dumps(data).encode()
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=body, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req) as resp:
+            content = resp.read()
+            return json.loads(content) if content else None
+    except urllib.error.HTTPError as e:
+        raise UserError(f"API error {e.code} on {method} {path}: {e.read().decode()}")
+    except urllib.error.URLError as e:
+        raise UserError(f"Could not connect to Syncthing at {base_url}: {e.reason}")
+
+
+def prompt(msg: str, default: str | None = None) -> str | None:
+    """Display a prompt and return the user's input.
+
+    If the user presses Enter without typing anything, default is returned.
+    KeyboardInterrupt and EOFError propagate to the caller.
+    """
+    display = f"{msg} [{default}]: " if default else f"{msg}: "
+    value = input(display).strip()
+    return value or default
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse and return command-line arguments.
+
+    When both --folder-id and --git-repo are provided the script runs
+    non-interactively.  Any missing value is prompted for at runtime.
+    """
+    search_paths = ", ".join(str(p) for p in _config_search_paths())
+    parser = argparse.ArgumentParser(
+        description="Configure syncthing-git-versioning for an existing Syncthing folder.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+If --folder-id and --git-repo are both given the script runs non-interactively.
+Otherwise it will prompt for any missing values.
+
+Examples:
+  %(prog)s --list-folders
+  %(prog)s --folder-id mypc-docs --git-repo ~/versions/docs
+  %(prog)s --folder-id mypc-docs --git-repo ~/versions/docs --versioning-script ~/bin/syncthing-git-versioning
+        """,
+    )
+    parser.add_argument(
+        "--folder-id",
+        metavar="ID",
+        help="Syncthing folder ID to configure",
+    )
+    parser.add_argument(
+        "--git-repo",
+        metavar="PATH",
+        help="Path to the git repository that will store old versions "
+             "(created and initialised if it does not exist)",
+    )
+    parser.add_argument(
+        "--versioning-script",
+        metavar="PATH",
+        help="Path to the syncthing-git-versioning script "
+             "(auto-detected from /usr/local/bin, XDG_BIN_HOME, and ./ if omitted)",
+    )
+    parser.add_argument(
+        "--api-url",
+        metavar="URL",
+        help="Syncthing REST API base URL (default: read from config.xml)",
+    )
+    parser.add_argument(
+        "--api-key",
+        metavar="KEY",
+        help="Syncthing API key (default: read from config.xml)",
+    )
+    parser.add_argument(
+        "--config",
+        metavar="PATH",
+        help="Path to Syncthing config.xml "
+             f"(searched in {search_paths} if omitted)",
+    )
+    parser.add_argument(
+        "--list-folders",
+        action="store_true",
+        help="List configured Syncthing folders and exit",
+    )
+    parser.add_argument(
+        "--yes", "-y",
+        action="store_true",
+        help="Skip confirmation prompt when overwriting existing versioning configuration",
+    )
+    return parser.parse_args()
+
+
+def resolve_api(args: argparse.Namespace) -> tuple[str, str]:
+    """Determine the API key and base URL to use.
+
+    If both --api-url and --api-key are supplied on the command line they are
+    used directly.  Otherwise config.xml is located and parsed.  The path in
+    --config takes precedence over auto-discovery.
+
+    Returns a (api_key, base_url) tuple.
+    Exits with an error message if config.xml cannot be found or parsed.
+    """
+    if args.api_url and args.api_key:
+        return args.api_key, args.api_url
+
+    config_path = Path(args.config) if args.config else find_syncthing_config()
+    if not config_path:
+        raise UserError(
+            "Could not find Syncthing config.xml; searched:\n"
+            + "\n".join(f"  {p}" for p in _config_search_paths())
+            + "\nOr pass --config / --api-url and --api-key explicitly."
+        )
+    api_key, base_url = parse_syncthing_config(config_path)
+    print(f"Syncthing config  : {config_path}")
+    return args.api_key or api_key, args.api_url or base_url
+
+
+def main() -> None:
+    """Entry point: parse arguments, connect to Syncthing, and apply versioning config."""
+    args = parse_args()
+
+    # Resolve versioning script
+    if args.versioning_script:
+        script_path = Path(args.versioning_script)
+        if not script_path.is_file() or not os.access(script_path, os.X_OK):
+            raise UserError(f"versioning script not found or not executable: {script_path}")
+    else:
+        script_path = find_versioning_script()
+        if not script_path:
+            raise UserError(
+                "syncthing-git-versioning not found in /usr/local/bin, "
+                "XDG_BIN_HOME (~/.local/bin), or next to this script. "
+                "Pass --versioning-script to specify its location."
+            )
+    print(f"Versioning script : {script_path}")
+
+    # Resolve API connection
+    api_key, base_url = resolve_api(args)
+    print(f"Syncthing API     : {base_url}")
+
+    folders = api(base_url, api_key, "/rest/config/folders")
+    if not folders:
+        raise UserError("No folders configured in Syncthing.")
+
+    if args.list_folders:
+        print("\nConfigured folders:")
+        for f in folders:
+            vtype = f.get("versioning", {}).get("type") or "none"
+            print(f"  id={f['id']!r:30s}  label={f['label']!r:25s}  path={f['path']}  versioning={vtype}")
+        return
+
+    # Select folder
+    if args.folder_id:
+        matches = [f for f in folders if f["id"] == args.folder_id]
+        if not matches:
+            ids = ", ".join(f["id"] for f in folders)
+            raise UserError(f"No folder with id {args.folder_id!r}. Known ids: {ids}")
+        folder = matches[0]
+    else:
+        print("\nConfigured folders:")
+        for i, f in enumerate(folders):
+            vtype = f.get("versioning", {}).get("type") or "none"
+            print(f"  [{i + 1}] {f['label']!r}  id={f['id']}  path={f['path']}  versioning={vtype}")
+        while True:
+            raw = prompt("\nFolder number to configure")
+            try:
+                idx = int(raw) - 1
+                if 0 <= idx < len(folders):
+                    folder = folders[idx]
+                    break
+            except (TypeError, ValueError):
+                pass
+            print("  Invalid choice, try again.")
+
+    # Warn about existing versioning
+    existing_vtype = folder.get("versioning", {}).get("type") or ""
+    if existing_vtype:
+        print(f"\nWarning: folder {folder['id']!r} already has versioning type={existing_vtype!r}")
+        if not args.yes:
+            if prompt("Overwrite? [y/N]", "N").lower() not in ("y", "yes"):
+                print("Aborted.")
+                return
+
+    # Resolve git repo path
+    folder_path = Path(folder["path"]).expanduser()
+    default_repo = str(folder_path.parent / (folder_path.name + "-versions"))
+    if args.git_repo:
+        repo_path = Path(args.git_repo)
+    else:
+        repo_path = Path(prompt("\nGit repository path for old versions", default_repo))
+
+    if not repo_path.exists():
+        print(f"Creating directory: {repo_path}")
+        repo_path.mkdir(parents=True)
+
+    if not (repo_path / ".git").exists():
+        print(f"Initializing git repository in {repo_path}")
+        subprocess.run(["git", "init", str(repo_path)], check=True)
+    else:
+        print(f"Using existing git repository at {repo_path}")
+
+    command = f"{script_path} {repo_path} %FOLDER_PATH% %FILE_PATH%"
+
+    folder["versioning"] = {
+        "type": "external",
+        "params": {"command": command},
+        "cleanupIntervalS": folder.get("versioning", {}).get("cleanupIntervalS", 3600),
+        "fsPath": "",
+        "fsType": "basic",
+    }
+
+    print(f"\nApplying configuration:")
+    print(f"  Folder  : {folder['label']!r} ({folder['id']})")
+    print(f"  Command : {command}")
+
+    api(base_url, api_key, f"/rest/config/folders/{folder['id']}", method="PUT", data=folder)
+    print("\nDone. Syncthing has applied the new versioning configuration.")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except UserError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
+    except (KeyboardInterrupt, EOFError):
+        print("\nAborted.")
+        sys.exit(1)
