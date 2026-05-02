@@ -22,10 +22,10 @@ old file contents can also be selectively deleted later to recover their space.
 
 This is useful for Syncthing users to keep old file versions around in an
 organised way. Old data is separated from the sync folder itself, so
-misbehaviour on a different node cannot lost data on your node. Note however
+misbehaviour on a different node cannot lose data on your node. Note however
 that it isn't a substitute for a backup system. Since Syncthing only calls the
 hook when a file is to be modified, it isn't possible to roll back to a
-snapshot at a given time. Nor is it possible prune old files according to their
+snapshot at a given time. Nor is it possible to prune old files according to their
 age, since their ages cannot be known to the hook.
 
 .. Finally, a paragraph that describes whom the product is useful for.
@@ -37,8 +37,8 @@ versioning script, then your old files can be stored there.
 Quick Start
 -----------
 
-#. Download ``syncthing-file-versioning`` to ``/usr/local/bin/`` and mark it
-   executable using ``chmod 755 /usr/local/bin/syncthing-file-versioning`` (or
+#. Download ``syncthing-git-versioning`` to ``/usr/local/bin/`` and mark it
+   executable using ``chmod 755 /usr/local/bin/syncthing-git-versioning`` (or
    use some other path as you wish).
 
 #. Create a git repository to correspond to a sync folder (create the
@@ -94,12 +94,12 @@ License
 -------
 
 This tool and associated files are subject to the terms of the Mozilla Public
-License, v. 2.0. A copy of the license is include the file ``LICENSE`` in the
+License, v. 2.0. A copy of the license is included in the file ``LICENSE`` in the
 source repository, or you can obtain it from https://mozilla.org/MPL/2.0/.
 
-An an exception, files found anywhere under ``apparmor.d/`` are distributed
-under the terms of tthe GNU General Public License, version 3. See the file
-``COYPING`` in that directory for the licence text.
+As an exception, files found anywhere under ``apparmor.d/`` are distributed
+under the terms of the GNU General Public License, version 3. See the file
+``COPYING`` in that directory for the licence text.
 
 .. _Syncthing: https://syncthing.net/
 .. _git-annex: https://git-annex.branchable.com/
