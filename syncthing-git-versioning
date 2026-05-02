@@ -53,10 +53,16 @@ unblock_dir_path() {
     git rm "./$p"
 }
 
+if [ "$1" = "setup" ]; then
+    shift
+    exec "$(dirname "$0")/syncthing-git-versioning-setup-folder" "$@"
+fi
+
 git_dir=$1
 syncthing_dir=$2
 file_path=$3
 dir_path=$(dirname "$file_path")
+
 
 remove_source_file() { rm -f "$syncthing_dir/$file_path"; }
 remove_destination_file() { rm -f "$git_dir/$file_path"; }

@@ -1,0 +1,3 @@
+[run]
+include = */syncthing-git-versioning-setup-folder
+parallel = true
