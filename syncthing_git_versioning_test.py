@@ -140,6 +140,77 @@ exec "$ORIG_GIT_PATH" "$@"
     assert (test_paths.sync / "target").exists()
 
 
+def test_git_dir_file_is_rejected(test_paths):
+    """Files inside .git/ must be rejected with a non-zero exit and the source file must survive."""
+    (test_paths.sync / ".git").mkdir()
+    (test_paths.sync / ".git" / "config").write_text("fake git config")
+    with pytest.raises(subprocess.CalledProcessError):
+        call_target(test_paths, ".git/config")
+    assert (test_paths.sync / ".git" / "config").exists(), \
+        "Source file must not be deleted when versioning is refused"
+
+
+def test_subdir_commits_file_at_correct_git_path(test_paths):
+    """When syncthing_dir is a subdirectory of git_dir, file is committed under the right path."""
+    subdir = test_paths.git / "docs"
+    subdir.mkdir()
+    (subdir / "readme.txt").write_text("content")
+    subprocess.check_call(
+        [
+            os.path.join(os.path.dirname(__file__), "syncthing-git-versioning"),
+            test_paths.git,   # git_dir (repo root)
+            subdir,           # syncthing_dir (subdir of repo)
+            "readme.txt",
+        ],
+        cwd=test_paths.other,
+    )
+    log = subprocess.check_output(
+        ["git", "log", "--oneline"], cwd=test_paths.git, text=True
+    )
+    assert log.strip(), "Expected at least one commit"
+    assert (subdir / "readme.txt").exists(), "File must not be deleted in subdir mode"
+    subprocess.check_call(["git", "reset", "--hard"], cwd=test_paths.git)
+    assert (test_paths.git / "docs" / "readme.txt").read_text() == "content"
+
+
+def test_same_dir_commits_file(test_paths):
+    """When git_dir == syncthing_dir, the file is committed in-place and not deleted."""
+    (test_paths.git / "target").write_text("content")
+    subprocess.check_call(
+        [
+            os.path.join(os.path.dirname(__file__), "syncthing-git-versioning"),
+            test_paths.git,
+            test_paths.git,
+            "target",
+        ],
+        cwd=test_paths.other,
+    )
+    log = subprocess.check_output(
+        ["git", "log", "--oneline"], cwd=test_paths.git, text=True
+    )
+    assert log.strip(), "Expected at least one commit"
+    assert (test_paths.git / "target").exists(), "File must not be deleted in same-dir mode"
+    subprocess.check_call(["git", "reset", "--hard"], cwd=test_paths.git)
+    assert (test_paths.git / "target").read_text() == "content"
+
+
+def test_same_dir_no_change_no_extra_commit(test_paths):
+    """In same-dir mode, calling the hook twice with unchanged content creates only one commit."""
+    (test_paths.git / "target").write_text("content")
+    cmd = [
+        os.path.join(os.path.dirname(__file__), "syncthing-git-versioning"),
+        test_paths.git,
+        test_paths.git,
+        "target",
+    ]
+    subprocess.check_call(cmd, cwd=test_paths.other)
+    subprocess.check_call(cmd, cwd=test_paths.other)
+    log = subprocess.check_output(
+        ["git", "log", "--oneline"], cwd=test_paths.git, text=True
+    )
+    assert len(log.strip().splitlines()) == 1, "Unchanged content should not produce a second commit"
+
+
 def test_cross_filesystem(test_paths):
     """Test basic functionality if Syncthing folder and git repository are on
     different filesystems.

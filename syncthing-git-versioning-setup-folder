@@ -222,6 +222,14 @@ Examples:
         action="store_true",
         help="Skip confirmation prompt when overwriting existing versioning configuration",
     )
+    parser.add_argument(
+        "--skip-git-dir",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Add /.git to Syncthing ignore patterns for this folder so the .git directory "
+             "is not synced to remote peers (prompted interactively when the folder has .git "
+             "and this flag is not given)",
+    )
     return parser.parse_args()
 
 
@@ -318,7 +326,11 @@ def main() -> None:
 
     # Resolve git repo path
     folder_path = Path(folder["path"]).expanduser()
-    default_repo = str(folder_path.parent / (folder_path.name + "-versions"))
+    folder_has_git = (folder_path / ".git").exists()
+    if folder_has_git:
+        default_repo = str(folder_path)
+    else:
+        default_repo = str(folder_path.parent / (folder_path.name + "-versions"))
     if args.git_repo:
         repo_path = Path(args.git_repo)
     else:
@@ -333,6 +345,24 @@ def main() -> None:
         subprocess.run(["git", "init", str(repo_path)], check=True)
     else:
         print(f"Using existing git repository at {repo_path}")
+
+    # Determine whether to add /.git to Syncthing's ignore patterns.
+    skip_git_dir = args.skip_git_dir
+    if skip_git_dir is None and folder_has_git:
+        answer = prompt("Add /.git to Syncthing ignore patterns (skip-git-dir)?", "y")
+        skip_git_dir = (answer or "").lower() in ("y", "yes")
+
+    if skip_git_dir:
+        ignores = api(base_url, api_key, f"/rest/db/ignores?folder={folder['id']}")
+        existing = (ignores or {}).get("ignore") or []
+        if "/.git" not in existing:
+            api(
+                base_url, api_key,
+                f"/rest/db/ignores?folder={folder['id']}",
+                method="POST",
+                data={"ignore": ["/.git"] + existing},
+            )
+            print("Added /.git to Syncthing ignore patterns.")
 
     command = f"{script_path} {repo_path} %FOLDER_PATH% %FILE_PATH%"
 

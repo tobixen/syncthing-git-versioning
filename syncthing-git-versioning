@@ -72,9 +72,45 @@ if has_parent_component "$file_path"; then
     exit 1
 fi
 
+case "$file_path" in
+    .git|.git/*)
+        echo "Error: refusing to version file inside .git directory: $file_path" >&2
+        exit 1
+        ;;
+esac
+
 if [ ! -f "$syncthing_dir/$file_path" ]; then
     echo "Error: $syncthing_dir/$file_path isn't a regular file" >&2
     exit 1
+fi
+
+# Detect whether the syncthing folder is the same as, or a subdirectory of,
+# the git working directory.  In either case the file is already in place;
+# compute its repo-relative path, commit it, and exit without deleting it so
+# Syncthing can write the incoming version on top.
+git_dir_real=$(realpath "$git_dir")
+syncthing_dir_real=$(realpath "$syncthing_dir")
+git_file_path=""
+
+if [ "$git_dir_real" = "$syncthing_dir_real" ]; then
+    git_file_path="$file_path"
+else
+    stripped="${syncthing_dir_real#"$git_dir_real/"}"
+    if [ "$stripped" != "$syncthing_dir_real" ]; then
+        git_file_path="$stripped/$file_path"
+    fi
+fi
+
+if [ -n "$git_file_path" ]; then
+    cd "$git_dir"
+    if git config --get annex.uuid >/dev/null; then
+        git annex add "./$git_file_path"
+    else
+        git add "./$git_file_path"
+    fi
+    git_status=$(git status --short --untracked-files=no)
+    [ "$git_status" != "" ] && git commit -m"syncthing versioning update"
+    exit 0
 fi
 
 cd "$git_dir"

@@ -520,6 +520,246 @@ def test_malformed_config_missing_address_exits_nonzero(test_folder, tmp_path):
 # Via `syncthing-git-versioning setup …`
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Same-dir: git repo IS the syncthing folder
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def test_folder_with_git(syncthing_api, tmp_path):
+    """Like test_folder but the sync directory is itself a git repository."""
+    api_key = syncthing_api["api_key"]
+    base_url = syncthing_api["base_url"]
+
+    folder_id = f"sgv-test-{uuid.uuid4().hex[:8]}"
+    sync_dir = tmp_path / "sync"
+    sync_dir.mkdir()
+    subprocess.run(["git", "init", str(sync_dir)], check=True, capture_output=True)
+
+    _api(
+        base_url,
+        api_key,
+        "/rest/config/folders",
+        method="POST",
+        data={
+            "id": folder_id,
+            "label": f"SGV Integration Test {folder_id}",
+            "path": str(sync_dir),
+            "type": "sendreceive",
+            "rescanIntervalS": 3600,
+            "fsWatcherEnabled": False,
+        },
+    )
+
+    yield {
+        "id": folder_id,
+        "path": sync_dir,
+        "api_key": api_key,
+        "base_url": base_url,
+    }
+
+    try:
+        _api(base_url, api_key, f"/rest/config/folders/{folder_id}", method="DELETE")
+    except Exception:
+        pass
+
+
+def test_same_dir_default_repo_is_folder(test_folder_with_git, tmp_path):
+    """When the syncthing folder already has .git, the default git-repo should be the folder itself."""
+    result = subprocess.run(
+        [
+            str(SETUP_SCRIPT),
+            "--folder-id", test_folder_with_git["id"],
+            "--versioning-script", str(VERSIONING_SCRIPT),
+            "--api-url", test_folder_with_git["base_url"],
+            "--api-key", test_folder_with_git["api_key"],
+            "--no-skip-git-dir",
+            "--yes",
+        ],
+        input="\n",  # accept the default git-repo path
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    folder = _get_folder_config(
+        test_folder_with_git["base_url"], test_folder_with_git["api_key"], test_folder_with_git["id"]
+    )
+    command = folder["versioning"]["params"]["command"]
+    # The repo path in the command is the first argument after the script; verify it's exactly
+    # the sync dir, not a sibling directory like sync-versions.
+    parts = command.split()
+    assert parts[1] == str(test_folder_with_git["path"]), \
+        f"Expected git-repo arg to be the sync dir itself, got: {parts[1]}"
+
+
+def test_skip_git_dir_adds_ignore_pattern(test_folder_with_git, tmp_path):
+    """--skip-git-dir should add /.git to the folder's Syncthing ignore patterns."""
+    git_repo = test_folder_with_git["path"]
+    result = subprocess.run(
+        [
+            str(SETUP_SCRIPT),
+            "--folder-id", test_folder_with_git["id"],
+            "--git-repo", str(git_repo),
+            "--versioning-script", str(VERSIONING_SCRIPT),
+            "--api-url", test_folder_with_git["base_url"],
+            "--api-key", test_folder_with_git["api_key"],
+            "--skip-git-dir",
+            "--yes",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    ignores = _api(
+        test_folder_with_git["base_url"],
+        test_folder_with_git["api_key"],
+        f"/rest/db/ignores?folder={test_folder_with_git['id']}",
+    )
+    assert "/.git" in ignores["ignore"]
+
+
+def test_no_skip_git_dir_does_not_add_ignore(test_folder_with_git, tmp_path):
+    """--no-skip-git-dir must not add /.git to ignore patterns."""
+    git_repo = test_folder_with_git["path"]
+    result = subprocess.run(
+        [
+            str(SETUP_SCRIPT),
+            "--folder-id", test_folder_with_git["id"],
+            "--git-repo", str(git_repo),
+            "--versioning-script", str(VERSIONING_SCRIPT),
+            "--api-url", test_folder_with_git["base_url"],
+            "--api-key", test_folder_with_git["api_key"],
+            "--no-skip-git-dir",
+            "--yes",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    ignores = _api(
+        test_folder_with_git["base_url"],
+        test_folder_with_git["api_key"],
+        f"/rest/db/ignores?folder={test_folder_with_git['id']}",
+    )
+    assert "/.git" not in (ignores.get("ignore") or [])
+
+
+def test_skip_git_dir_interactive_prompt_yes(test_folder_with_git):
+    """Interactive mode: answering y to the .git skip prompt adds the ignore pattern."""
+    git_repo = test_folder_with_git["path"]
+    result = subprocess.run(
+        [
+            str(SETUP_SCRIPT),
+            "--folder-id", test_folder_with_git["id"],
+            "--git-repo", str(git_repo),
+            "--versioning-script", str(VERSIONING_SCRIPT),
+            "--api-url", test_folder_with_git["base_url"],
+            "--api-key", test_folder_with_git["api_key"],
+            "--yes",
+        ],
+        input="y\n",  # answer the skip-git-dir prompt
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    ignores = _api(
+        test_folder_with_git["base_url"],
+        test_folder_with_git["api_key"],
+        f"/rest/db/ignores?folder={test_folder_with_git['id']}",
+    )
+    assert "/.git" in ignores["ignore"]
+
+
+@pytest.fixture()
+def test_folder_subdir_of_git(syncthing_api, tmp_path):
+    """Syncthing folder is a subdirectory of an existing git repository."""
+    api_key = syncthing_api["api_key"]
+    base_url = syncthing_api["base_url"]
+
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    subprocess.run(["git", "init", str(repo_dir)], check=True, capture_output=True)
+
+    folder_id = f"sgv-test-{uuid.uuid4().hex[:8]}"
+    sync_dir = repo_dir / "docs"
+    sync_dir.mkdir()
+
+    _api(
+        base_url,
+        api_key,
+        "/rest/config/folders",
+        method="POST",
+        data={
+            "id": folder_id,
+            "label": f"SGV Integration Test {folder_id}",
+            "path": str(sync_dir),
+            "type": "sendreceive",
+            "rescanIntervalS": 3600,
+            "fsWatcherEnabled": False,
+        },
+    )
+
+    yield {
+        "id": folder_id,
+        "path": sync_dir,
+        "repo": repo_dir,
+        "api_key": api_key,
+        "base_url": base_url,
+    }
+
+    try:
+        _api(base_url, api_key, f"/rest/config/folders/{folder_id}", method="DELETE")
+    except Exception:
+        pass
+
+
+def test_subdir_setup_and_sync(test_folder_subdir_of_git):
+    """When syncthing_dir is a subdir of the git repo, setup should use repo root as git-repo
+    and the versioning hook should commit files at their correct repo-relative path."""
+    tf = test_folder_subdir_of_git
+    result = subprocess.run(
+        [
+            str(SETUP_SCRIPT),
+            "--folder-id", tf["id"],
+            "--git-repo", str(tf["repo"]),
+            "--versioning-script", str(VERSIONING_SCRIPT),
+            "--api-url", tf["base_url"],
+            "--api-key", tf["api_key"],
+            "--yes",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+    folder = _get_folder_config(tf["base_url"], tf["api_key"], tf["id"])
+    (tf["path"] / "notes.txt").write_text("hello from docs")
+    _invoke_versioning_hook(folder, tf["path"], "notes.txt")
+
+    log = subprocess.run(
+        ["git", "log", "--oneline"], cwd=tf["repo"], capture_output=True, text=True, check=True,
+    )
+    assert log.stdout.strip(), "Expected a commit in the git repo"
+
+    subprocess.run(["git", "reset", "--hard"], cwd=tf["repo"], check=True)
+    assert (tf["repo"] / "docs" / "notes.txt").read_text() == "hello from docs"
+
+
+def test_skip_git_dir_not_prompted_for_non_git_folder(test_folder, tmp_path):
+    """When the syncthing folder has no .git, there should be no skip-git-dir prompt."""
+    git_repo = tmp_path / "versions"
+    result = subprocess.run(
+        _setup_args(test_folder, git_repo),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "skip-git-dir" not in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Via `syncthing-git-versioning setup …`
+# ---------------------------------------------------------------------------
+
 def test_via_main_script_setup_subcommand(test_folder, tmp_path):
     """Invoke via `syncthing-git-versioning setup …` once the dispatch bug is fixed."""
     git_repo = tmp_path / "versions"
