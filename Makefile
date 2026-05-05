@@ -32,5 +32,7 @@ uninstall:
 	rm -vf $(INSTALL_DIR)/$(SETUP_SCRIPT)
 	@echo "Done."
 
+PYTEST = $(shell command -v pytest || command -v pytest3 || command -v py.test || command -v py3.test || echo "python3 -m pytest")
+
 test:
-	python3 syncthing_git_versioning_test.py
+	$(PYTEST)

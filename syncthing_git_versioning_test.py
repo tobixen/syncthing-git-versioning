@@ -51,9 +51,14 @@ def call_target(test_paths, file_path, env=None):
     )
 
 
+git_annex_installed = shutil.which("git-annex") is not None
+
+
 @pytest.mark.parametrize(["annex"], [(False,), (True,)])
 def test_single_file(annex, test_paths):
     if annex:
+        if not git_annex_installed:
+            pytest.skip("git-annex not installed")
         subprocess.check_call(["git", "annex", "init"], cwd=test_paths.git)
     (test_paths.sync / "target").write_text("content")
     call_target(test_paths, "target")
@@ -66,6 +71,8 @@ def test_single_file(annex, test_paths):
 @pytest.mark.parametrize(["annex"], [(False,), (True,)])
 def test_no_change(annex, test_paths):
     if annex:
+        if not git_annex_installed:
+            pytest.skip("git-annex not installed")
         subprocess.check_call(["git", "annex", "init"], cwd=test_paths.git)
     (test_paths.sync / "target").write_text("content")
     call_target(test_paths, "target")
