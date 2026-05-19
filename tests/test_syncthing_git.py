@@ -62,7 +62,10 @@ def test_no_change(annex, test_paths):
         subprocess.check_call(["git", "annex", "init"], cwd=test_paths.sync)
     (test_paths.sync / "target").write_text("content")
     call_target(test_paths, "target")
-    (test_paths.sync / "target").write_text("content")
+    target = test_paths.sync / "target"
+    if target.is_symlink():
+        target.unlink()
+    target.write_text("content")
     call_target(test_paths, "target")
     log = subprocess.check_output(
         ["git", "log", "--oneline"], cwd=test_paths.sync, text=True
