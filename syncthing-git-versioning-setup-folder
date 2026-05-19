@@ -162,33 +162,29 @@ def prompt(msg: str, default: str | None = None) -> str | None:
 def parse_args() -> argparse.Namespace:
     """Parse and return command-line arguments.
 
-    When both --folder-id and --git-repo are provided the script runs
-    non-interactively.  Any missing value is prompted for at runtime.
+    When --folder-id is provided the script runs non-interactively.
+    Any missing value is prompted for at runtime.
     """
     search_paths = ", ".join(str(p) for p in _config_search_paths())
     parser = argparse.ArgumentParser(
         description="Configure syncthing-git-versioning for an existing Syncthing folder.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-If --folder-id and --git-repo are both given the script runs non-interactively.
+If --folder-id is given the script runs non-interactively.
 Otherwise it will prompt for any missing values.
+
+The git repository is always initialised inside the Syncthing folder itself.
 
 Examples:
   %(prog)s --list-folders
-  %(prog)s --folder-id mypc-docs --git-repo ~/versions/docs
-  %(prog)s --folder-id mypc-docs --git-repo ~/versions/docs --versioning-script ~/bin/syncthing-git-versioning
+  %(prog)s --folder-id mypc-docs
+  %(prog)s --folder-id mypc-docs --versioning-script ~/bin/syncthing-git-versioning
         """,
     )
     parser.add_argument(
         "--folder-id",
         metavar="ID",
         help="Syncthing folder ID to configure",
-    )
-    parser.add_argument(
-        "--git-repo",
-        metavar="PATH",
-        help="Path to the git repository that will store old versions "
-             "(created and initialised if it does not exist)",
     )
     parser.add_argument(
         "--versioning-script",
@@ -227,8 +223,7 @@ Examples:
         action=argparse.BooleanOptionalAction,
         default=None,
         help="Add /.git to Syncthing ignore patterns for this folder so the .git directory "
-             "is not synced to remote peers (prompted interactively when the folder has .git "
-             "and this flag is not given)",
+             "is not synced to remote peers (prompted interactively when this flag is not given)",
     )
     return parser.parse_args()
 
@@ -324,21 +319,9 @@ def main() -> None:
                 print("Aborted.")
                 return
 
-    # Resolve git repo path
+    # The git repository always lives inside the Syncthing folder itself.
     folder_path = Path(folder["path"]).expanduser()
-    folder_has_git = (folder_path / ".git").exists()
-    if folder_has_git:
-        default_repo = str(folder_path)
-    else:
-        default_repo = str(folder_path.parent / (folder_path.name + "-versions"))
-    if args.git_repo:
-        repo_path = Path(args.git_repo)
-    else:
-        repo_path = Path(prompt("\nGit repository path for old versions", default_repo))
-
-    if not repo_path.exists():
-        print(f"Creating directory: {repo_path}")
-        repo_path.mkdir(parents=True)
+    repo_path = folder_path
 
     if not (repo_path / ".git").exists():
         print(f"Initializing git repository in {repo_path}")
@@ -347,8 +330,9 @@ def main() -> None:
         print(f"Using existing git repository at {repo_path}")
 
     # Determine whether to add /.git to Syncthing's ignore patterns.
+    # Since .git is always inside the synced folder, always offer this option.
     skip_git_dir = args.skip_git_dir
-    if skip_git_dir is None and folder_has_git:
+    if skip_git_dir is None:
         answer = prompt("Add /.git to Syncthing ignore patterns (skip-git-dir)?", "y")
         skip_git_dir = (answer or "").lower() in ("y", "yes")
 
