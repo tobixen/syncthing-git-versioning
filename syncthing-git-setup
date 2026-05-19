@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Set up syncthing-git-versioning for an existing Syncthing folder.
+Set up syncthing-git for an existing Syncthing folder.
 
 Using this script should be a lot easier than manual web setup
 
@@ -59,18 +59,18 @@ def _config_search_paths() -> list[Path]:
 
 
 def find_versioning_script() -> Path | None:
-    """Locate the syncthing-git-versioning executable.
+    """Locate the syncthing-git executable.
 
-    Searches /usr/local/bin, the XDG user bin directory (XDG_BIN_HOME,
-    defaulting to ~/.local/bin), and the directory containing this script,
+    Searches the directory containing this script, /usr/local/bin, and the
+    XDG user bin directory (XDG_BIN_HOME, defaulting to ~/.local/bin),
     in that order.
 
     Returns the path of the first executable found, or None if none exists.
     """
     candidates = [
-        Path(__file__).resolve().parent / "syncthing-git-versioning",
-        Path("/usr/local/bin/syncthing-git-versioning"),
-        _xdg_bin_home() / "syncthing-git-versioning",
+        Path(__file__).resolve().parent / "syncthing-git",
+        Path("/usr/local/bin/syncthing-git"),
+        _xdg_bin_home() / "syncthing-git",
     ]
     for path in candidates:
         if path.is_file() and os.access(path, os.X_OK):
@@ -167,7 +167,7 @@ def parse_args() -> argparse.Namespace:
     """
     search_paths = ", ".join(str(p) for p in _config_search_paths())
     parser = argparse.ArgumentParser(
-        description="Configure syncthing-git-versioning for an existing Syncthing folder.",
+        description="Configure syncthing-git for an existing Syncthing folder.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 If --folder-id is given the script runs non-interactively.
@@ -178,7 +178,7 @@ The git repository is always initialised inside the Syncthing folder itself.
 Examples:
   %(prog)s --list-folders
   %(prog)s --folder-id mypc-docs
-  %(prog)s --folder-id mypc-docs --versioning-script ~/bin/syncthing-git-versioning
+  %(prog)s --folder-id mypc-docs --versioning-script ~/bin/syncthing-git
         """,
     )
     parser.add_argument(
@@ -189,7 +189,7 @@ Examples:
     parser.add_argument(
         "--versioning-script",
         metavar="PATH",
-        help="Path to the syncthing-git-versioning script "
+        help="Path to the syncthing-git script "
              "(auto-detected from /usr/local/bin, XDG_BIN_HOME, and ./ if omitted)",
     )
     parser.add_argument(
@@ -266,7 +266,7 @@ def main() -> None:
         script_path = find_versioning_script()
         if not script_path:
             raise UserError(
-                "syncthing-git-versioning not found in /usr/local/bin, "
+                "syncthing-git not found in /usr/local/bin, "
                 "XDG_BIN_HOME (~/.local/bin), or next to this script. "
                 "Pass --versioning-script to specify its location."
             )
@@ -348,7 +348,7 @@ def main() -> None:
             )
             print("Added /.git to Syncthing ignore patterns.")
 
-    command = f"{script_path} {repo_path} %FOLDER_PATH% %FILE_PATH%"
+    command = f"{script_path} %FOLDER_PATH% %FILE_PATH%"
 
     folder["versioning"] = {
         "type": "external",

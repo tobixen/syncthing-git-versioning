@@ -9,8 +9,8 @@
 # `sudo make install` is easier to type than
 # `sudo mv syncthink-git-versioning /usr/local/bin`
 
-SCRIPT = syncthing-git-versioning
-SETUP_SCRIPT = syncthing-git-versioning-setup-folder
+SCRIPT = syncthing-git
+SETUP_SCRIPT = syncthing-git-setup
 
 ifeq ($(shell id -u), 0)
 	INSTALL_DIR = /usr/local/bin

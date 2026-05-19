@@ -27,6 +27,25 @@ repositories in a safe way.
 This script is designed to work on Linux-systems.  This tool is useful
 for Syncthing users with basic git knowledge.
 
+Syncthing vs git
+----------------
+
+Git is in itself also sort of a synchronization protocol - one may exchange changesets over multiple hosts using ``git pull`` and ``git push``.  However, Syncthing gives quite some things that git cannot offer:
+
+* Automatic synchronization.  Do some work on the primary laptop, get
+  interrupted with no time to neither do ``git commit`` nor ``git
+  push`` - and using only git, the changeset will stay on the laptop.
+  With syncthing-git you can already have a copy of the
+  work-in-progress on your other device.
+
+* Automatic host discovery.  Mobile devices (and nowadays, even
+  devices on some cabled internet at home or in the office) tends to
+  have temporary IP-adresses, so if I'm to push from one device to the
+  other, I first have to know the IP-address of the other device.
+  With NAT on IPv4, mobile connections, firewalls, etc, most client
+  equipment is not even properly connected to the network - Syncthing
+  was designed to punch through such kind of things.
+
 Caveats
 -------
 

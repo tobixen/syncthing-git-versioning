@@ -1,15 +1,14 @@
 """
-Integration tests for syncthing-git-versioning-setup-folder.
+Integration tests for syncthing-git-setup.
 
 Prerequisites: Syncthing must be running and accessible.  All tests are
 skipped automatically when Syncthing is not reachable.
 
 Each test creates a temporary Syncthing folder via the REST API and removes it
-on teardown.  Temporary git repositories land under tmp_path (pytest manages
-cleanup).
+on teardown.
 
 Run with:
-    pytest syncthing_git_versioning_setup_folder_test.py -v
+    pytest tests/test_syncthing_git_setup.py -v
 
 Copyright 2024 Tobias Brox
 This Source Code Form is subject to the terms of the Mozilla Public
@@ -29,9 +28,9 @@ from pathlib import Path
 import pytest
 
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-SETUP_SCRIPT = SCRIPT_DIR / "syncthing-git-versioning-setup-folder"
-VERSIONING_SCRIPT = SCRIPT_DIR / "syncthing-git-versioning"
+SCRIPT_DIR = Path(__file__).resolve().parent.parent
+SETUP_SCRIPT = SCRIPT_DIR / "syncthing-git-setup"
+VERSIONING_SCRIPT = SCRIPT_DIR / "syncthing-git"
 
 # ---------------------------------------------------------------------------
 # Low-level Syncthing API helpers (duplicated intentionally — tests should not
